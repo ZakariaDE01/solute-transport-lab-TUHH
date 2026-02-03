@@ -30,197 +30,80 @@ from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 import os
 
+Q_L_per_min = 0.25
+d_m = 0.065
+porosity = 0.36
+L = 0.32
 
-                                                                                              # INPUTS
-
-
-# Hydraulic / geometry inputs (used to compute pore velocity automatically)
-Q_L_per_min = 0.25         
-d_m = 0.065                 
-porosity = 0.36             
-L = 0.32                    
-
-                                                                                     # Convertung Q to m^3/s
-Q = Q_L_per_min / 1000.0 / 60.0   
-
-                                                       # Computing cross-sectional area, Darcy velocity q, and pore-water velocity v
-A = np.pi * (d_m ** 2) / 4.0
+Q = Q_L_per_min / 1000.0 / 60.0
+A = np.pi * d_m**2 / 4.0
 q = Q / A
 v = q / porosity
 
-                                                                                         # Velocity
-print("=== Hydraulic / Geometry Summary ===")
-print(f"Flow rate Q = {Q_L_per_min} L/min = {Q:.3e} m^3/s")
-print(f"Column diameter d = {d_m:.3f} m, area A = {A:.3e} m^2")
-print(f"Porosity = {porosity}")
-print(f"Darcy flux q = {q:.3e} m/s")
-print(f"Pore-water velocity v = {v:.3e} m/s")
-print("====================================\n")
+t_step = np.array([80,150,180,247,311,373,436,497,562,624,688,751,814,877,938,1003,1071,1133,1198,1261,1325,1388,1452,1516,1580,1644,1712], float)
+EC_step = np.array([297,291,281,272,267,268,262,258,257,249,234,243,245,251,300,455,704,968,1231,1478,1670,1736,1831,1843,1829,1828,1827], float)
 
+EC_background = 250.0
+EC_inlet = 1850.0
 
-                                                                   # STEP experimental data (time [s], EC [microS/cm])
+t_pulse = np.array([83,121,162,201,243,284,326,368,408,450,492,532,573,615,658,700,743,785,827,870,911,955,998,1041,1083,1126,1167,1209,1253,1298,1340,1382,1425,1467,1510,1551,1594,1639,1682,1725,1769,1812], float)
+EC_pulse = np.array([268,261,255,251,248,242,244,242,240,238,236,234,234,227,231,227,229,235,265,391,658,882,898,890,665,545,465,419,374,345,321,305,291,279,270,262,258,253,250,245,244,241], float)
 
-t_step = np.array([80,150,180,247,311,373,436,497,562,624,688,751,814,877,938,1003,1071,1133,1198,1261,1325,1388,1452,1516,1580,1644,1712], dtype=float)
-EC_step = np.array([297,291,281,272,267,268,262,258,257,249,234,243,245,251,300,455,704,968,1231,1478,1670,1736,1831,1843,1829,1828,1827], dtype=float)
+EC_peak_pulse = EC_pulse.max()
 
-                                                                     # Background and inlet EC for normalization 
-EC_background = 250.0    
-EC_inlet_step = 1850.0   
-
-                                                                   # PULSE experiment data (time [s], EC [µS/cm])
-
-t_pulse = np.array([83,121,162,201,243,284,326,368,408,450,492,532,573,615,658,700,743,785,827,870,911,955,998,1041,1083,1126,1167,1209,1253,1298,1340,1382,1425,1467,1510,1551,1594,1639,1682,1725,1769,1812], dtype=float)
-EC_pulse = np.array([268,261,255,251,248,242,244,242,240,238,236,234,234,227,231,227,229,235,265,391,658,882,898,890,665,545,465,419,374,345,321,305,291,279,270,262,258,253,250,245,244,241], dtype=float)
-
-EC_background_pulse = 250.0   
-EC_peak_pulse = max(EC_pulse)  
-
-
-                                                                                # ADE analytical solutions 
-
-
-def step_solution(t, R, D, L, v):
-    """
-    Analytical solution for a step input (normalized concentration at x=L, time t)
-    C_rel = 0.5 * erfc((R*L - v*t) / sqrt(4*R*D*t))
-    This function returns 0 for t<=0 safely.
-    """
-    t = np.asarray(t, dtype=float)
+def step_solution(t, R, D):
+    t = np.asarray(t)
     C = np.zeros_like(t)
-    mask = t > 0
-    tt = t[mask]
-    denom = np.sqrt(4.0 * R * D * tt)
-    arg = (R * L - v * tt) / denom
-    C[mask] = 0.5 * erfc(arg)
+    m = t > 0
+    tt = t[m]
+    arg = (R*L - v*tt) / np.sqrt(4*R*D*tt)
+    C[m] = 0.5 * erfc(arg)
     return C
 
-def pulse_solution(t, R, D, t0, L, v):
-    """
-    Pulse = step(t) - step(t - t0)
-    t0 = pulse duration (s)
-    """
-    t = np.asarray(t, dtype=float)
-    s1 = step_solution(t, R, D, L, v)
-    t_minus = t - t0
-    s2 = step_solution(t_minus, R, D, L, v)
-    return s1 - s2
+def pulse_solution(t, R, D, t0):
+    return step_solution(t, R, D) - step_solution(t - t0, R, D)
 
+Crel_step = np.clip((EC_step - EC_background) / (EC_inlet - EC_background), 0, 1)
+Crel_pulse = np.clip((EC_pulse - EC_background) / (EC_peak_pulse - EC_background), 0, 1)
 
-Crel_step = (EC_step - EC_background) / (EC_inlet_step - EC_background)
-Crel_step = np.clip(Crel_step, 0.0, 1.0)
+popt_step, _ = curve_fit(step_solution, t_step, Crel_step, p0=[10,1e-6], bounds=([0.01,1e-12],[1e3,1e-2]), maxfev=20000)
+R_step, D_step = popt_step
 
-Crel_pulse = (EC_pulse - EC_background_pulse) / (EC_peak_pulse - EC_background_pulse)
-Crel_pulse = np.clip(Crel_pulse, 0.0, 1.0)
+popt_pulse, _ = curve_fit(pulse_solution, t_pulse, Crel_pulse, p0=[10,1e-6,200], bounds=([0.01,1e-12,1],[1e3,1e-2,5000]), maxfev=40000)
+R_pulse, D_pulse, t0_pulse = popt_pulse
 
-
-                                                                                            # Fitting STEP data 
-
-
-p0_step = [5.0, 1e-5]          
-bounds_step = ([0.01, 1e-10], [1e3, 1e-1]) 
-
-
-def fit_step(t, R, D):
-    return step_solution(t, R, D, L, v)
-
-try:
-    popt_step, pcov_step = curve_fit(fit_step, t_step, Crel_step, p0=p0_step, bounds=bounds_step, maxfev=20000)
-    R_step, D_step = popt_step
-    perr_step = np.sqrt(np.diag(pcov_step))
-except Exception as e:
-    print("STEP fit failed:", e)
-    R_step, D_step = np.nan, np.nan
-    perr_step = [np.nan, np.nan]
-
-
-                                                                                   # Fit PULSE data (fit R, D, t0)
-
-
-p0_pulse = [5.0, 1e-6, 200.0]   
-bounds_pulse = ([0.01, 1e-12, 1.0], [1e3, 1e-1, 5e4])
-
-def fit_pulse(t, R, D, t0):
-    return pulse_solution(t, R, D, t0, L, v)
-
-try:
-    popt_pulse, pcov_pulse = curve_fit(fit_pulse, t_pulse, Crel_pulse, p0=p0_pulse, bounds=bounds_pulse, maxfev=40000)
-    R_pulse, D_pulse, t0_pulse = popt_pulse
-    perr_pulse = np.sqrt(np.diag(pcov_pulse))
-except Exception as e:
-    print("PULSE fit failed:", e)
-    R_pulse, D_pulse, t0_pulse = np.nan, np.nan, np.nan
-    perr_pulse = [np.nan, np.nan, np.nan]
-
-
-                                                                                        # Printing results
-
-print("\n=== STEP fit results ===")
-print(f"R_step = {R_step:.3f}  (± {perr_step[0]:.3f} if available)")
-print(f"D_step = {D_step:.3e} m^2/s  (± {perr_step[1]:.3e} if available)")
-
-print("\n=== PULSE fit results ===")
-print(f"R_pulse = {R_pulse:.3f}  (± {perr_pulse[0]:.3f} if available)")
-print(f"D_pulse = {D_pulse:.3e} m^2/s  (± {perr_pulse[1]:.3e} if available)")
-print(f"t0_pulse = {t0_pulse:.1f} s  (± {perr_pulse[2]:.1f} if available)")
-
-
-
-
-
-# Prepare figure directory
 out_dir = "ADE_plots"
 os.makedirs(out_dir, exist_ok=True)
 
-# STEP plot
-t_plot = np.linspace(min(t_step)*0.9, max(t_step)*1.1, 400)
-C_fit_step = step_solution(t_plot, R_step, D_step, L, v)
-T_star_step = v * t_step / L
-T_star_plot = v * t_plot / L
+t_plot = np.linspace(t_step.min(), t_step.max(), 400)
+T_step = v * t_step / L
+T_plot = v * t_plot / L
 
 plt.figure(figsize=(7,5))
-plt.plot(T_star_step, Crel_step, 'o', label='STEP measured (normalized)', markersize=6)
-plt.plot(T_star_plot, C_fit_step, '-', label=f'STEP fit (R={R_step:.2f}, D={D_step:.2e})')
-plt.xlabel('Dimensionless time $T^* = v t / L$')
-plt.ylabel('Relative concentration $C/C_0$')
-plt.title('STEP experiment: measured vs ADE fit')
+plt.plot(T_step, Crel_step, 'o', label='Measured')
+plt.plot(T_plot, step_solution(t_plot, R_step, D_step), '-', label='Modeled')
+plt.xlabel('Dimensionless time $T^*$')
+plt.ylabel('$C/C_0$')
+plt.title('STEP experiment')
 plt.legend()
-plt.grid(linestyle='--', alpha=0.6)
-plt.tight_layout()
-plt.savefig(os.path.join(out_dir, 'STEP_fit.png'), dpi=300)
+plt.grid(True)
+plt.savefig(os.path.join(out_dir, 'STEP_measured_modeled.png'), dpi=300)
 plt.show()
 
-# PULSE plot
-t_plot_p = np.linspace(min(t_pulse)*0.9, max(t_pulse)*1.1, 400)
-C_fit_pulse = pulse_solution(t_plot_p, R_pulse, D_pulse, t0_pulse, L, v)
-T_star_pulse = v * t_pulse / L
-T_star_plot_p = v * t_plot_p / L
+t_plot_p = np.linspace(t_pulse.min(), t_pulse.max(), 400)
+T_pulse = v * t_pulse / L
+T_plot_p = v * t_plot_p / L
 
 plt.figure(figsize=(7,5))
-plt.plot(T_star_pulse, Crel_pulse, 'o', label='PULSE measured (normalized)', markersize=6)
-plt.plot(T_star_plot_p, C_fit_pulse, '-', label=f'PULSE fit (R={R_pulse:.2f}, D={D_pulse:.2e}, t0={t0_pulse:.0f}s)')
-plt.xlabel('Dimensionless time $T^* = v t / L$')
-plt.ylabel('Relative concentration $C/C_0$')
-plt.title('PULSE experiment: measured vs ADE fit')
+plt.plot(T_pulse, Crel_pulse, 'o', label='Measured')
+plt.plot(T_plot_p, pulse_solution(t_plot_p, R_pulse, D_pulse, t0_pulse), '-', label='Modeled')
+plt.xlabel('Dimensionless time $T^*$')
+plt.ylabel('$C/C_0$')
+plt.title('PULSE experiment')
 plt.legend()
-plt.grid(linestyle='--', alpha=0.6)
-plt.tight_layout()
-plt.savefig(os.path.join(out_dir, 'PULSE_fit.png'), dpi=300)
+plt.grid(True)
+plt.savefig(os.path.join(out_dir, 'PULSE_measured_modeled.png'), dpi=300)
 plt.show()
 
-
-results_txt = os.path.join(out_dir, "ADE_fit_results.txt")
-with open(results_txt, "w") as f:
-    f.write("ADE fitting results\n")
-    f.write("===================\n")
-    f.write(f"Hydraulic/geometry: Q={Q_L_per_min} L/min, d={d_m} m, porosity={porosity}, L={L} m\n")
-    f.write(f"Computed pore-water velocity v = {v:.6e} m/s\n\n")
-    f.write("STEP fit results:\n")
-    f.write(f"R_step = {R_step:.6f}\n")
-    f.write(f"D_step = {D_step:.6e} m^2/s\n\n")
-    f.write("PULSE fit results:\n")
-    f.write(f"R_pulse = {R_pulse:.6f}\n")
-    f.write(f"D_pulse = {D_pulse:.6e} m^2/s\n")
-    f.write(f"t0_pulse = {t0_pulse:.2f} s\n")
-
-print(f"\nPlots and results saved in folder: {out_dir}")
-print(f" - STEP_fit.png, PULSE_fit.png, ADE_fit_results.txt")
+print("STEP: R =", R_step, "D =", D_step)
+print("PULSE: R =", R_pulse, "D =", D_pulse, "t0 =", t0_pulse)
