@@ -1,7 +1,28 @@
 """
+Technische Universitat Hamburg                                                                                                                             Geo-Hydroinformatics Institute                          
+
+
+
+                                              Estimate retardation factor R and dispersion coefficient D from STEP and PULSE column experiments.
+                                            
+
+
+
 Zakaria Boukertouta (Group03)
-Estimate retardation factor R and dispersion coefficient D from STEP and PULSE column experiments.
-Includes the experimental datasets (time [s], EC [µS/cm]) embedded in the script.
+Lecturer : Dr. Milad Aminzadeh
+Date of the Experiment : November 25, 2025
+Winter Semester 2025/2026
+
+
+
+
+
+
+
+
+
+
+
 
 import numpy as np
 from scipy.special import erfc
@@ -14,13 +35,13 @@ import os
 
 
 # Hydraulic / geometry inputs (used to compute pore velocity automatically)
-Q_L_per_min = 0.25          # volumetric flow rate [L/min]
-d_m = 0.065                 # column inner diameter [m]
-porosity = 0.36             # porosity (dimensionless)
-L = 0.32                    # column length [m]
+Q_L_per_min = 0.25         
+d_m = 0.065                 
+porosity = 0.36             
+L = 0.32                    
 
                                                                                      # Convertung Q to m^3/s
-Q = Q_L_per_min / 1000.0 / 60.0   # m^3/s
+Q = Q_L_per_min / 1000.0 / 60.0   
 
                                                        # Computing cross-sectional area, Darcy velocity q, and pore-water velocity v
 A = np.pi * (d_m ** 2) / 4.0
